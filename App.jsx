@@ -20,6 +20,7 @@ const DEFAULT_PRODUCTS = [
   { id: "p4", n: "Wool Lukhum", p: 199, i: "https://images.pexels.com/photos/3889818/pexels-photo-3889818.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Warm knitted winter hat for baby", cat: "Lukhum", size: ["S"] },
   { id: "p5", n: "Jean Kekawr", p: 550, i: "https://images.pexels.com/photos/6261888/pexels-photo-6261888.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Stylish kids jeans pants", cat: "Kekawr", size: ["L"] },
   { id: "p6", n: "Teddy Toy", p: 399, i: "https://images.pexels.com/photos/20692469/pexels-photo-20692469.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Soft plush teddy bear", cat: "Toys", size: ["M"] },
+  { id: "p7", n: "Naupang Kawr", p: 599, i: "lydia.jpg" },
 ];
 
 function lsRead(key, fallback) {
