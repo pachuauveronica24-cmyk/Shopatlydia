@@ -405,10 +405,13 @@ function CartPage({ products, cart, changeQty, removeItem, placeOrder, setView, 
             </div>
             <div className="qr-label">Scan to pay via GPay / UPI</div>
             <div className="gp-detail">
-              GPay / UPI: <strong>{GPAY}</strong><br />
-              Account: <strong>{GPAY_ACC}</strong><br />
-              IFSC: <strong>{GPAY_IFSC}</strong><br />
-              Bank: <strong>{GPAY_BANK}</strong>
+    GPay / UPI: <strong>{GPAY}</strong><br />
+     Scan QR to pay
+   </div>
+  
+</div>
+            
+              
             </div>
           </div>
         )}
