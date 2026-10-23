@@ -930,10 +930,12 @@ function AdminProducts() {
   const [form, setForm] = useState({ n: "", p: "", i: "", desc: "", cat: CATEGORIES[0], size: [] });
 
   useEffect(() => {
-    const stored = lsRead("lydia_products", null);
-    if (stored && Array.isArray(stored)) setProducts(stored);
-    else { lsWrite("lydia_products", DEFAULT_PRODUCTS); setProducts(DEFAULT_PRODUCTS); }
-  }, []);
+  async function load() {
+    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
+    if (data) setProducts(data);
+  }
+  load();
+}, []);
 
   function toggleSize(s) {
     setForm(f => {
@@ -941,31 +943,22 @@ function AdminProducts() {
       return { ...f, size: sizes };
     });
   }
-
-  function handleImageUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("5MB ai tlem thlang rawh"); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const maxWidth = 800;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) { height = Math.round(height * maxWidth / width); width = maxWidth; }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-        setForm(f => ({ ...f, i: dataUrl }));
-      };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+async function handleImageUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { alert("File a lian lutuk! 5MB aia tam lo ni rawh se"); return; }
+  
+  // Supabase storage ah upload
+  const fileName = Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9.]/g, "_");
+  const { data, error } = await supabase.storage.from('product-images').upload(fileName, file);
+  
+  if (error) { alert("Upload failed: " + error.message); return; }
+  
+  const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+  setForm(f => ({ ...f, i: urlData.publicUrl }));
+}
+  
+  
   }
 
   function triggerGallery() {
@@ -978,18 +971,21 @@ function AdminProducts() {
     if (fi) { fi.setAttribute("capture", "environment"); fi.click(); }
   }
 
-  function saveProduct() {
-    if (!form.n || !form.p || !form.i) { alert("Please fill name, price, and upload an image"); return; }
-    if (editingId) {
-      const updated = products.map(p => p.id === editingId ? { ...p, n: form.n, p: parseInt(form.p, 10), i: form.i, desc: form.desc, cat: form.cat, size: form.size } : p);
-      lsWrite("lydia_products", updated); setProducts(updated);
-      setEditingId(null);
-    } else {
-      const newProduct = { id: "p" + Date.now(), n: form.n, p: parseInt(form.p, 10), i: form.i, desc: form.desc, cat: form.cat, size: form.size };
-      const updated = [...products, newProduct];
-      lsWrite("lydia_products", updated); setProducts(updated);
-    }
-    setForm({ n: "", p: "", i: "", desc: "", cat: CATEGORIES[0], size: [] });
+  async function saveProduct() {
+  if (!form.n || !form.p || !form.i) { alert("Name, Price leh Image a ngai!"); return; }
+  const productData = { n: form.n, p: Number(form.p), i: form.i, desc: form.desc || "", cat: form.cat || CAT[0] };
+
+  if (editingId) {
+    const { data, error } = await supabase.from('products').update(productData).eq('id', editingId).select();
+    if (error) { alert("Edit failed: " + error.message); return; }
+    if (data) setProducts(products.map(p => p.id == editingId ? data[0] : p));
+    setEditingId(null);
+  } else {
+    const { data, error } = await supabase.from('products').insert([productData]).select();
+    if (error) { alert("Add failed: " + error.message); return; }
+    if (data) setProducts([data[0], ...products]);
+  }
+  setForm({ n: "", p: "", i: "", desc: "", cat: CAT[0] });
   }
 
   function editProduct(p) {
@@ -1001,8 +997,27 @@ function AdminProducts() {
   function deleteProduct(id) {
     if (!confirm("Delete this product?")) return;
     const updated = products.filter(p => p.id !== id);
-    lsWrite("lydia_products", updated); setProducts(updated);
+    // --- SUPABASE ADD ---
+const fileInput = document.getElementById("productImageFile");
+let imageUrl = form.i;
+
+if (fileInput && fileInput.files && fileInput.files[0]) {
+  const file = fileInput.files[0];
+  const fileName = Date.now() + "_" + file.name;
+  const { data: uploadData, error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
+  if (!uploadError) {
+    const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+    imageUrl = urlData.publicUrl;
   }
+}
+
+const newProduct = { n: form.n, p: Number(form.p), i: imageUrl, desc: form.desc, cat: form.cat };
+
+const { data, error } = await supabase.from('products').insert([newProduct]).select();
+if (!error && data) {
+  setProducts([data[0], ...products]);
+}
+
 
   const filtered = search ? products.filter(p => p.n.toLowerCase().includes(search.toLowerCase())) : products;
   const sizeLabel = (s) => Array.isArray(s) ? s.join(", ") : (s || "");
