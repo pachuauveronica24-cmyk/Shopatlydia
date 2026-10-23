@@ -1,9 +1,6 @@
 import { useState, useEffect } from "react";
 
 const WA = "919366747560";
-const GPAY = "919366747560";
-const GPAY_BANK = "SBI";
-const GPAY_BRANCH = "Serchhip";
 const ADMIN_PHONE = "9366747560";
 const DEFAULT_PASS = "lydia2026";
 
