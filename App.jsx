@@ -854,12 +854,14 @@ function AdminDashboard() {
   const [wishCount, setWishCount] = useState(0);
 
   useEffect(() => {
-    const stored = lsRead("lydia_products", null);
-    if (stored && Array.isArray(stored)) setProducts(stored);
-    else { lsWrite("lydia_products", DEFAULT_PRODUCTS); setProducts(DEFAULT_PRODUCTS); }
+  async function load() {
+    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
+    if (data) setProducts(data);
     setOrders(lsRead("lydia_orders", []));
-    setWishCount(lsRead("lydia_wish", []).length);
-  }, []);
+    setWishCount(lsRead("lydia_wish", []).length || 0);
+  }
+  load();
+}, []);
 
   const totalSales = orders.filter(o => o.status !== "Cancelled").reduce((s, o) => s + o.total, 0);
   const pendingOrders = orders.filter(o => o.status !== "Delivered" && o.status !== "Cancelled").length;
