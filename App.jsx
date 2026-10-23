@@ -994,29 +994,11 @@ async function handleImageUpload(e) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function deleteProduct(id) {
-    if (!confirm("Delete this product?")) return;
-    const updated = products.filter(p => p.id !== id);
-    // --- SUPABASE ADD ---
-const fileInput = document.getElementById("productImageFile");
-let imageUrl = form.i;
-
-if (fileInput && fileInput.files && fileInput.files[0]) {
-  const file = fileInput.files[0];
-  const fileName = Date.now() + "_" + file.name;
-  const { data: uploadData, error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-  if (!uploadError) {
-    const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
-    imageUrl = urlData.publicUrl;
-  }
-}
-
-const newProduct = { n: form.n, p: Number(form.p), i: imageUrl, desc: form.desc, cat: form.cat };
-
-const { data, error } = await supabase.from('products').insert([newProduct]).select();
-if (!error && data) {
-  setProducts([data[0], ...products]);
-}
+async function deleteProduct(id) {
+  if (!confirm("Delete this product?")) return;
+  const { error } = await supabase.from('products').delete().eq('id', id);
+  if (error) { alert("Delete failed: " + error.message); return; }
+  setProducts(products.filter(p => p.id != id));
 
 
   const filtered = search ? products.filter(p => p.n.toLowerCase().includes(search.toLowerCase())) : products;
