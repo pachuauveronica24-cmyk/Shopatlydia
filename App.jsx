@@ -155,7 +155,7 @@ function Shop({ myOrdersRoute }) {
   function orderWhatsApp(id) {
     const p = products.find(x => x.id === id);
     if (!p) return;
-    const msg = `Chibai! Shop at Lydia - ${p.n} Rs${p.p} ka duh e. GPay: ${GPAY} Acc: ${GPAY_ACC} IFSC: ${GPAY_IFSC}`;
+    const msg = `Chibai! Shop at Lydia - ${p.n} Rs${p.p} ka duh e. GPay: ${GPAY}`;
     window.open(`https://wa.me/${WA}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
