@@ -22,7 +22,25 @@ const DEFAULT_PRODUCTS = [
   { id: "p6", n: "Teddy Toy", p: 399, i: "https://images.pexels.com/photos/20692469/pexels-photo-20692469.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Soft plush teddy bear", cat: "Toys", size: ["M"] },
   { id: "p7", n: "Naupang Kawr", p: 599, i: "https://via.placeholder.com/300" },
 ];
+// 1. Upload
+const { data, error } = await supabase.storage
+  .from('product-images')
+  .upload(`${Date.now()}.jpg`, file)
 
+if (error) {
+  console.log(error.message) // Hetah hian eng error nge min lo hrilh?
+} else {
+  // 2. URL lak
+  const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(data.path)
+  
+  // 3. Table ah dah
+  await supabase.from('products').insert({
+    name: "Test Product",
+    price: 1000,
+    image_url: urlData.publicUrl
+  })
+  alert("Done!")
+}
 function lsRead(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
