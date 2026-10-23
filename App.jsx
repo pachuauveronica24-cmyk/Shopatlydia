@@ -192,7 +192,7 @@ function Shop({ myOrdersRoute }) {
     let msg = `*Shop at Lydia - New Order*\n\nOrder ID: ${id}\n\n*Products:*\n`;
     items.forEach(c => { msg += `\u2022 ${c.n} x${c.qty} = \u20b9${c.p * c.qty}\n`; });
     msg += `\n*Total: \u20b9${total}*\n\n*Customer Details:*\nName: ${cust.name}\nPhone: ${cust.phone}\nAddress: ${cust.address}\nVillage: ${cust.village}\n\n*Payment: ${payMethod}*\n`;
-    if (payMethod === "GPay") msg += `GPay: ${GPAY}\nAcc: ${GPAY_ACC} IFSC: ${GPAY_IFSC}\n`;
+    if (payMethod === "GPay") msg += `GPay: ${GPAY}\n`;
     else msg += `Cash on Delivery - Free Delivery in Mizoram\n`;
     window.open(`https://wa.me/${WA}?text=${encodeURIComponent(msg)}`, "_blank");
     return id;
