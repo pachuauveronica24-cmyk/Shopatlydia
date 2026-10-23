@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 
 const WA = "919366747560";
 const GPAY = "919366747560";
-const GPAY_ACC = "35068540552";
-const GPAY_IFSC = "SBIN0005826";
 const GPAY_BANK = "SBI";
 const GPAY_BRANCH = "Serchhip";
 const ADMIN_PHONE = "9366747560";
