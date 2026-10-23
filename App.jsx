@@ -950,11 +950,11 @@ async function handleImageUpload(e) {
   
   // Supabase storage ah upload
   const fileName = Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9.]/g, "_");
-  const { data, error } = await supabase.storage.from('product-images').upload(fileName, file);
+  const { data, error } = await supabase.storage.from('products-images').upload(fileName, file);
   
   if (error) { alert("Upload failed: " + error.message); return; }
   
-  const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName);
+  const { data: urlData } = supabase.storage.from('products-images').getPublicUrl(fileName);
   setForm(f => ({ ...f, i: urlData.publicUrl }));
 }
   
@@ -995,7 +995,7 @@ async function handleImageUpload(e) {
   }
 
 async function deleteProduct(id) {
-  if (!confirm("Delete this product?")) return;
+  if (!confirm("Delete this products?")) return;
   const { error } = await supabase.from('products').delete().eq('id', id);
   if (error) { alert("Delete failed: " + error.message); return; }
   setProducts(products.filter(p => p.id != id));
