@@ -1,6 +1,45 @@
 import { useState, useEffect } from "react";
 
+
+// Supabase REST/Auth helpers. Only the publishable/anon key belongs in this browser app.
+const SB_URL = import.meta.env.VITE_SUPABASE_URL;
+const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SB_BUCKET = "product-images";
+function sbHeaders(token) { return { apikey: SB_KEY, Authorization: `Bearer ${token || SB_KEY}`, "Content-Type": "application/json" }; }
+function sbSession() { try { return JSON.parse(sessionStorage.getItem("sb_admin_session") || "null"); } catch { return null; } }
+async function sbLogin(email, password) {
+  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, { method: "POST", headers: sbHeaders(), body: JSON.stringify({ email, password }) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.msg || j.message || j.error_description || "Login failed");
+  sessionStorage.setItem("sb_admin_session", JSON.stringify(j)); return j;
+}
+async function sbRequest(path, options={}) {
+  const session = sbSession();
+  const r = await fetch(`${SB_URL}${path}`, { ...options, headers: { ...sbHeaders(session?.access_token), ...(options.headers || {}) } });
+  if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.message || j.error || `Supabase request failed (${r.status})`); }
+  return r.status === 204 ? null : r.json();
+}
+async function fetchProducts() {
+  const rows = await sbRequest(`/rest/v1/lydia_products?select=id,data&order=id.asc`);
+  return rows.map(row => ({ ...row.data, id: row.id }));
+}
+async function upsertProduct(product) {
+  await sbRequest(`/rest/v1/lydia_products?on_conflict=id`, { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id: String(product.id), data: product, updated_at: new Date().toISOString() }) });
+}
+async function removeProduct(id) { await sbRequest(`/rest/v1/lydia_products?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" }); }
+async function uploadProductImage(dataUrl, id) {
+  if (!dataUrl?.startsWith("data:image/")) return dataUrl;
+  const [meta, encoded] = dataUrl.split(",");
+  const mime = (meta.match(/data:(.*?);base64/) || [])[1] || "image/jpeg";
+  const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
+  const path = `${id}-${Date.now()}.jpg`;
+  const session = sbSession();
+  const r = await fetch(`${SB_URL}/storage/v1/object/${SB_BUCKET}/${path}`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${session?.access_token || SB_KEY}`, "Content-Type": mime, "x-upsert": "true" }, body: bytes });
+  if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.message || "Image upload failed. Check Storage bucket and policies."); }
+  return `${SB_URL}/storage/v1/object/public/${SB_BUCKET}/${path}`;
+}
+
 const WA = "919366747560";
+const GPAY = "919366747560";
 const ADMIN_PHONE = "9366747560";
 const DEFAULT_PASS = "lydia2026";
 
@@ -15,27 +54,8 @@ const DEFAULT_PRODUCTS = [
   { id: "p4", n: "Wool Lukhum", p: 199, i: "https://images.pexels.com/photos/3889818/pexels-photo-3889818.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Warm knitted winter hat for baby", cat: "Lukhum", size: ["S"] },
   { id: "p5", n: "Jean Kekawr", p: 550, i: "https://images.pexels.com/photos/6261888/pexels-photo-6261888.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Stylish kids jeans pants", cat: "Kekawr", size: ["L"] },
   { id: "p6", n: "Teddy Toy", p: 399, i: "https://images.pexels.com/photos/20692469/pexels-photo-20692469.jpeg?auto=compress&cs=tinysrgb&h=650&w=940", desc: "Soft plush teddy bear", cat: "Toys", size: ["M"] },
-  { id: "p7", n: "Naupang Kawr", p: 599, i: "https://via.placeholder.com/300" },
 ];
-// 1. Upload
-const { data, error } = await supabase.storage
-  .from('product-images')
-  .upload(`${Date.now()}.jpg`, file)
 
-if (error) {
-  console.log(error.message) // Hetah hian eng error nge min lo hrilh?
-} else {
-  // 2. URL lak
-  const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(data.path)
-  
-  // 3. Table ah dah
-  await supabase.from('products').insert({
-    name: "Test Product",
-    price: 1000,
-    image_url: urlData.publicUrl
-  })
-  alert("Done!")
-}
 function lsRead(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -122,11 +142,16 @@ function Shop({ myOrdersRoute }) {
   }
 
   useEffect(() => {
-    const stored = lsRead("lydia_products", null);
-    if (stored && Array.isArray(stored)) setProducts(stored);
-    else { lsWrite("lydia_products", DEFAULT_PRODUCTS); setProducts(DEFAULT_PRODUCTS); }
-    setCart(lsRead("lydia_cart", []));
-    setWish(lsRead("lydia_wish", []));
+    let active = true;
+    fetchProducts().then(items => { if (active) setProducts(items); }).catch(err => {
+      console.error(err); const stored = lsRead("lydia_products", null);
+      if (active) setProducts(Array.isArray(stored) ? stored : DEFAULT_PRODUCTS);
+    });
+    setCart(lsRead("lydia_cart", [])); setWish(lsRead("lydia_wish", []));
+    const onFocus = () => fetchProducts().then(items => active && setProducts(items)).catch(()=>{});
+    window.addEventListener("focus", onFocus);
+    const poll = window.setInterval(onFocus, 30000);
+    return () => { active = false; window.removeEventListener("focus", onFocus); window.clearInterval(poll); };
   }, [refresh]);
 
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
@@ -155,7 +180,7 @@ function Shop({ myOrdersRoute }) {
   function orderWhatsApp(id) {
     const p = products.find(x => x.id === id);
     if (!p) return;
-    const msg = `Chibai! Shop at Lydia - ${p.n} Rs${p.p} ka duh e. GPay: ${GPAY}`;
+    const msg = `Chibai! Shop at Lydia - ${p.n} Rs${p.p} ka duh e. GPay / UPI: ${GPAY}`;
     window.open(`https://wa.me/${WA}?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
@@ -192,7 +217,7 @@ function Shop({ myOrdersRoute }) {
     let msg = `*Shop at Lydia - New Order*\n\nOrder ID: ${id}\n\n*Products:*\n`;
     items.forEach(c => { msg += `\u2022 ${c.n} x${c.qty} = \u20b9${c.p * c.qty}\n`; });
     msg += `\n*Total: \u20b9${total}*\n\n*Customer Details:*\nName: ${cust.name}\nPhone: ${cust.phone}\nAddress: ${cust.address}\nVillage: ${cust.village}\n\n*Payment: ${payMethod}*\n`;
-    if (payMethod === "GPay") msg += `GPay: ${GPAY}\n`;
+    if (payMethod === "GPay") msg += `GPay / UPI: ${GPAY}\n`;
     else msg += `Cash on Delivery - Free Delivery in Mizoram\n`;
     window.open(`https://wa.me/${WA}?text=${encodeURIComponent(msg)}`, "_blank");
     return id;
@@ -244,8 +269,7 @@ function ShopHome({ products, wish, cartCount, wishCount, searchOpen, searchTerm
         </div>
         <div className={`search-bar ${searchOpen ? "active" : ""}`}>
           <input type="text" placeholder="Search products..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoFocus={searchOpen} />
-        </div>
-        {customer && (
+        </div>customer && (
           <div style={{ background: "var(--pink)", color: "white", padding: "6px 15px", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span><i className="fa-solid fa-user"></i> {customer.name}</span>
             <span style={{ display: "flex", gap: 15 }}>
@@ -258,7 +282,7 @@ function ShopHome({ products, wish, cartCount, wishCount, searchOpen, searchTerm
       <div className="hero">
         <h1>Veronica Collection</h1>
         <p>Naupang thawmhnaw mawi - Direct WhatsApp Order</p>
-        <div className="gp-info">GPay: {GPAY} | Acc: {GPAY_ACC} {GPAY_BANK}</div>
+        <div className="gp-info">GPay / UPI: {GPAY}</div>
       </div>
       <div className="categories">
         {["All", ...CATEGORIES].map(c => (
@@ -405,13 +429,8 @@ function CartPage({ products, cart, changeQty, removeItem, placeOrder, setView, 
             </div>
             <div className="qr-label">Scan to pay via GPay / UPI</div>
             <div className="gp-detail">
-    GPay / UPI: <strong>{GPAY}</strong><br />
-     Scan QR to pay
-   </div>
-  
-</div>
-            
-              
+              GPay / UPI: <strong>{GPAY}</strong><br />
+
             </div>
           </div>
         )}
@@ -572,6 +591,7 @@ function CustomerLoginModal({ onLogin, onClose }) {
         {step === "forgot-phone" && (
           <div style={{ textAlign: "left", marginBottom: 16 }}>
             <div style={{ marginBottom: 10 }}><label style={{ fontSize: 12, fontWeight: 600, color: "#999", display: "block", marginBottom: 4 }}>Phone (10 digit)</label>
+              <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Your registered phone" style={{ width: "100%", padding: "10pxdigit)</label>
               <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Your registered phone" style={{ width: "100%", padding: "10px 14px", border: "1.5px solid var(--border)", borderRadius: 10, fontSize: 14, outline: "none" }} autoFocus onKeyDown={e => e.key === "Enter" && sendOTP()} />
             </div>
             <button onClick={sendOTP} style={{ width: "100%", background: "var(--pink)", color: "white", border: "none", padding: "12px", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer" }}>Send OTP</button>
@@ -665,18 +685,16 @@ function MyOrdersPage({ setView, customer, setShowLogin, customerLogout }) {
 /* ============ ADMIN ============ */
 
 function AdminApp() {
-  const [loggedIn, setLoggedIn] = useState(() => localStorage.getItem("lydia_admin_login") === "1");
+  const [loggedIn, setLoggedIn] = useState(() => !!sbSession()?.access_token);
   const [tab, setTab] = useState("dashboard");
 
   function logout() {
-    localStorage.removeItem("lydia_admin_login");
-    setLoggedIn(false);
+    const session = sbSession();
+    if (session?.access_token) fetch(`${SB_URL}/auth/v1/logout`, { method: "POST", headers: sbHeaders(session.access_token) }).catch(()=>{});
+    sessionStorage.removeItem("sb_admin_session"); setLoggedIn(false);
   }
 
-  function doLogin() {
-    localStorage.setItem("lydia_admin_login", "1");
-    setLoggedIn(true);
-  }
+  function doLogin() { setLoggedIn(true); }
 
   if (!loggedIn) return <AdminLogin onLogin={doLogin} />;
 
@@ -730,7 +748,7 @@ function AdminApp() {
 }
 
 function AdminLogin({ onLogin }) {
-  const [phone, setPhone] = useState(ADMIN_PHONE);
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState(DEFAULT_PASS);
   const [showPass, setShowPass] = useState(false);
   const [showErr, setShowErr] = useState(false);
@@ -744,14 +762,13 @@ function AdminLogin({ onLogin }) {
   const [resetReady, setResetReady] = useState(false);
   const [err, setErr] = useState("");
 
-  function login() {
-    const correctPass = getAdminPass();
-    if (last10Digits(phone) === ADMIN_PHONE && password === correctPass) {
-      localStorage.setItem("lydia_admin_login", "1");
+  async function login() {
+    setShowErr(false); setErr("");
+    try {
+      await sbLogin(phone.trim(), password);
+      // RLS verifies this authenticated user is listed in public.admin_users before allowing writes.
       onLogin();
-    } else {
-      setShowErr(true);
-    }
+    } catch (e) { setErr(e.message || "Login failed"); setShowErr(true); }
   }
 
   function sendAdminOTP() {
@@ -842,22 +859,22 @@ function AdminLogin({ onLogin }) {
       <div className="bg-white rounded-2xl shadow-lg p-8 max-w-sm w-full text-center">
         <div className="w-14 h-14 bg-pink-500 text-white rounded-2xl grid place-items-center text-2xl mx-auto mb-4"><i className="fa-solid fa-lock"></i></div>
         <h2 className="text-pink-600 font-bold text-xl mb-1">Shop at Lydia <span className="text-gray-400 font-normal text-sm">- Admin</span></h2>
-        <div className={`text-red-500 text-sm mb-2 ${showErr ? "block" : "hidden"}`}>Wrong phone or password!</div>
+        <div className={`text-red-500 text-sm mb-2 ${showErr ? "block" : "hidden"}`}>{err || "Sign-in failed. Check your email and password."}</div>
         <div className="text-left mb-3">
-          <label className="text-xs font-semibold text-gray-400 block mb-1">Phone</label>
-          <input id="adminPhone" type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-4 py-2.5 border-2 border-pink-200 rounded-xl text-sm outline-none focus:border-pink-500" placeholder="9366747560" />
+          <label className="text-xs font-semibold text-gray-400 block mb-1">Admin email</label>
+          <input id="adminPhone" type="email" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-4 py-2.5 border-2 border-pink-200 rounded-xl text-sm outline-none focus:border-pink-500" placeholder="admin@example.com" autoComplete="username" required />
         </div>
         <div className="text-left mb-4">
           <label className="text-xs font-semibold text-gray-400 block mb-1">Password</label>
           <div className="relative">
-            <input id="adminPass" type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && login()} className="w-full px-4 py-2.5 pr-10 border-2 border-pink-200 rounded-xl text-sm outline-none focus:border-pink-500" placeholder="password" />
+            <input id="adminPass" type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && login()} className="w-full px-4 py-2.5 pr-10 border-2 border-pink-200 rounded-xl text-sm outline-none focus:border-pink-500" placeholder="Supabase Auth password" autoComplete="current-password" />
             <button onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-500">
               <i className={`fa-solid ${showPass ? "fa-eye-slash" : "fa-eye"}`}></i>
             </button>
           </div>
         </div>
         <button onClick={login} className="w-full bg-pink-500 text-white py-2.5 rounded-xl font-semibold hover:bg-pink-600 transition-colors">Login</button>
-        <button onClick={() => setForgotMode(true)} className="mt-3 text-pink-400 text-xs font-medium hover:text-pink-600">Forgot Password?</button>
+        <p className="mt-3 text-xs text-gray-400">Create/reset the admin account in Supabase Authentication.</p>
         <a href="/" className="block mt-3 text-pink-500 text-sm font-medium hover:underline">&larr; Back to Shop</a>
       </div>
     </div>
@@ -870,14 +887,10 @@ function AdminDashboard() {
   const [wishCount, setWishCount] = useState(0);
 
   useEffect(() => {
-  async function load() {
-    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (data) setProducts(data);
+    fetchProducts().then(setProducts).catch(() => setProducts(lsRead("lydia_products", DEFAULT_PRODUCTS)));
     setOrders(lsRead("lydia_orders", []));
-    setWishCount(lsRead("lydia_wish", []).length || 0);
-  }
-  load();
-}, []);
+    setWishCount(lsRead("lydia_wish", []).length);
+  }, []);
 
   const totalSales = orders.filter(o => o.status !== "Cancelled").reduce((s, o) => s + o.total, 0);
   const pendingOrders = orders.filter(o => o.status !== "Delivered" && o.status !== "Cancelled").length;
@@ -945,13 +958,7 @@ function AdminProducts() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ n: "", p: "", i: "", desc: "", cat: CATEGORIES[0], size: [] });
 
-  useEffect(() => {
-  async function load() {
-    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (data) setProducts(data);
-  }
-  load();
-}, []);
+  useEffect(() => { fetchProducts().then(setProducts).catch(e => alert(`Could not load Supabase products: ${e.message}`)); }, []);
 
   function toggleSize(s) {
     setForm(f => {
@@ -959,22 +966,31 @@ function AdminProducts() {
       return { ...f, size: sizes };
     });
   }
-async function handleImageUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (file.size > 5 * 1024 * 1024) { alert("File a lian lutuk! 5MB aia tam lo ni rawh se"); return; }
-  
-  // Supabase storage ah upload
-  const fileName = Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9.]/g, "_");
-  const { data, error } = await supabase.storage.from('products-images').upload(fileName, file);
-  
-  if (error) { alert("Upload failed: " + error.message); return; }
-  
-  const { data: urlData } = supabase.storage.from('products-images').getPublicUrl(fileName);
-  setForm(f => ({ ...f, i: urlData.publicUrl }));
-}
-  
-  
+
+  function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("5MB ai tlem thlang rawh"); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxWidth = 800;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) { height = Math.round(height * maxWidth / width); width = maxWidth; }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+        setForm(f => ({ ...f, i: dataUrl }));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   }
 
   function triggerGallery() {
@@ -988,20 +1004,17 @@ async function handleImageUpload(e) {
   }
 
   async function saveProduct() {
-  if (!form.n || !form.p || !form.i) { alert("Name, Price leh Image a ngai!"); return; }
-  const productData = { n: form.n, p: Number(form.p), i: form.i, desc: form.desc || "", cat: form.cat || CAT[0] };
-
-  if (editingId) {
-    const { data, error } = await supabase.from('products').update(productData).eq('id', editingId).select();
-    if (error) { alert("Edit failed: " + error.message); return; }
-    if (data) setProducts(products.map(p => p.id == editingId ? data[0] : p));
-    setEditingId(null);
-  } else {
-    const { data, error } = await supabase.from('products').insert([productData]).select();
-    if (error) { alert("Add failed: " + error.message); return; }
-    if (data) setProducts([data[0], ...products]);
-  }
-  setForm({ n: "", p: "", i: "", desc: "", cat: CAT[0] });
+    if (!form.n || !form.p || !form.i) { alert("Please fill name, price, and upload an image"); return; }
+    try {
+      const id = editingId || "p" + Date.now();
+      const imageUrl = await uploadProductImage(form.i, id);
+      const product = { id, n: form.n, p: parseInt(form.p, 10), i: imageUrl, desc: form.desc, cat: form.cat, size: form.size };
+      await upsertProduct(product);
+      const updated = editingId ? products.map(p => p.id === id ? product : p) : [...products, product];
+      setProducts(updated); lsWrite("lydia_products", updated); setEditingId(null);
+      setForm({ n: "", p: "", i: "", desc: "", cat: CATEGORIES[0], size: [] });
+      alert("Product saved to Supabase. Customers on other devices can now see it.");
+    } catch (e) { alert(`Save failed: ${e.message}`); }
   }
 
   function editProduct(p) {
@@ -1010,12 +1023,11 @@ async function handleImageUpload(e) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-async function deleteProduct(id) {
-  if (!confirm("Delete this products?")) return;
-  const { error } = await supabase.from('products').delete().eq('id', id);
-  if (error) { alert("Delete failed: " + error.message); return; }
-  setProducts(products.filter(p => p.id != id));
-
+  async function deleteProduct(id) {
+    if (!confirm("Delete this product?")) return;
+    try { await removeProduct(id); const updated = products.filter(p => p.id !== id); lsWrite("lydia_products", updated); setProducts(updated); }
+    catch (e) { alert(`Delete failed: ${e.message}`); }
+  }
 
   const filtered = search ? products.filter(p => p.n.toLowerCase().includes(search.toLowerCase())) : products;
   const sizeLabel = (s) => Array.isArray(s) ? s.join(", ") : (s || "");
@@ -1101,8 +1113,7 @@ async function deleteProduct(id) {
               {p.desc && <p className="text-xs text-gray-400 mt-1 truncate">{p.desc}</p>}
               <div className="flex gap-2 mt-2">
                 <button onClick={() => editProduct(p)} className="text-pink-500 text-xs font-semibold hover:text-pink-700"><i className="fa-solid fa-pen"></i> Edit</button>
-                <button onClick={() => deleteProduct(p.id)} className="text-red-400 text-xs font-semibold hover:text-red-600"><i className="fa-solid fa-trash"></i> Delete</button>
-              </div>
+                <button onClick={() => deleteProduct(p.id)} className="text-red-400 text-xs font-semibold hover:text-red-600"><i className="fa-solid fa-trash"></i> Delete</button>              </div>
             </div>
           </div>
         ))}
@@ -1201,7 +1212,6 @@ function AdminOrders() {
               <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${o.paymentMethod === "GPay" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
                 {o.paymentMethod === "GPay" ? `GPay ${GPAY}` : "COD"}
               </span>
-              {o.paymentMethod === "GPay" && <span className="text-[10px] text-gray-400">Acc: {GPAY_ACC} IFSC: {GPAY_IFSC}</span>}
               <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${statusColor(o.status)}`}>{o.status}</span>
             </div>
             <div className="flex gap-2 items-center">
@@ -1307,9 +1317,6 @@ function AdminSettings() {
         <div className="space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-gray-400">WhatsApp</span><span className="font-semibold text-gray-600">{ADMIN_PHONE} / {WA}</span></div>
           <div className="flex justify-between"><span className="text-gray-400">GPay</span><span className="font-semibold text-gray-600">{GPAY}</span></div>
-          <div className="flex justify-between"><span className="text-gray-400">Account</span><span className="font-semibold text-gray-600">{GPAY_ACC}</span></div>
-          <div className="flex justify-between"><span className="text-gray-400">IFSC</span><span className="font-semibold text-gray-600">{GPAY_IFSC}</span></div>
-          <div className="flex justify-between"><span className="text-gray-400">Bank</span><span className="font-semibold text-gray-600">{GPAY_BANK} {GPAY_BRANCH}</span></div>
           <div className="flex justify-between"><span className="text-gray-400">Delivery</span><span className="font-semibold text-green-600">Free Delivery Mizoram</span></div>
         </div>
         <button onClick={saveSettings} className="w-full bg-pink-500 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-pink-600 mt-4">Save Settings</button>
